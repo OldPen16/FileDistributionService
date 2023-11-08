@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "/KCsTLCbA2byqHWBLoVTtbFgB+eh1OjFPR6eL1gtANU=",
+  "Source": "FileDistributionService",
+  "BasePath": "_content/FileDistributionService",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}
