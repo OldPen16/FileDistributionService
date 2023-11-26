@@ -1,7 +1,26 @@
-﻿using System.Text.Json;
+﻿using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.Data.Common;
+using System.Text.Json;
 
 namespace FileDistributionService.Middleware
 {
+    public class FileException : Exception
+    {
+        public FileException()
+            : base()
+        {
+
+        }
+    }
+    public class DatabaseException : Exception
+    {
+        public DatabaseException()
+            : base()
+        {
+
+        }
+    }
     public class GlobalException
     {
         private readonly RequestDelegate _requestDelegate;
@@ -20,14 +39,42 @@ namespace FileDistributionService.Middleware
             {
                 await _requestDelegate(context);
             }
-            catch (Exception e)
+            catch (FileException validationException)
             {
-                _logger.LogError(e, "An unhandled exception occurred.");
+                _logger.LogError(validationException, "File exception.");
 
-                var response = new
+                var response = new Response 
                 {
                     StatusCode = StatusCodes.Status500InternalServerError,
-                    Message = "Sorry! Error occurred while processing your request."
+                    StatusMessage = "Sorry! File exception occurred."
+                };
+
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(response));
+            }
+            catch (DatabaseException databaseException)
+            {
+                _logger.LogError(databaseException, "Database exception.");
+
+                var response = new Response
+                {
+                    StatusCode = StatusCodes.Status500InternalServerError,
+                    StatusMessage = "Sorry! Database exception occurred."
+                };
+
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(response));
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "An unknown exception occurred.");
+
+                var response = new Response
+                {
+                    StatusCode = StatusCodes.Status500InternalServerError,
+                    StatusMessage = "Sorry! Error occurred while processing your request."
                 };
 
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;

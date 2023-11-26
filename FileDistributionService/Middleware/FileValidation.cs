@@ -1,4 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using FileDistributionService;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion.Internal;
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 
 namespace FileDistributionService.Middleware
 {
@@ -17,90 +21,78 @@ namespace FileDistributionService.Middleware
 
         public async Task Invoke(HttpContext context, ApplicationContext _applicationContext)
         {
-            // In GET request=>
-            // a. Validate the download times of the file
-            // b. Validate the file type/extension
-            // c. Validate the file size
-            if (context.Request.Method.ToUpper().Equals("GET"))
-            {
-                if (!ValidateDownloadTime())
-                {
-                    _logger.LogInformation("Invalidate download time");
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    return;
-                }
-
-                var fileId = Convert.ToString(context.Request.Query["id"]);
-                if (fileId == null)
-                {
-                    _logger.LogInformation("Invalid file id in the HTTP request");
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    return;
-                }
-
-                var fileModel = await _applicationContext.Files.FirstOrDefaultAsync(o => o.Id.Equals(fileId));
-                if (fileModel == null)
-                {
-                    _logger.LogInformation("File data doesn't not exist in the database");
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    return;
-                }
-
-                string filePath = Path.Combine(_configuration["FileSettings:FolderPath"], fileModel.Id);
-                if (!File.Exists(filePath))
-                {
-                    _logger.LogInformation("File not found");
-                    context.Response.StatusCode = StatusCodes.Status404NotFound;
-                    return;
-                }
-
-                byte[] file = File.ReadAllBytes(filePath);
-                var validateFileType = ValidateFileTypesForDownload(fileModel.Name);
-                if (validateFileType)
-                {
-                    var validateFileSize = ValidateFileSize(file.Length);
-                    if (!validateFileSize)
-                    {
-                        _logger.LogInformation($"Invalid file size of {file.Length}");
-                        context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                        return;
-                    }
-                }
-
-                context.Response.StatusCode = StatusCodes.Status200OK;
-            }  
-            // In POST request=>
-            // a. Validate the file type/extension
-            // b. Validate the file size
-            else if (context.Request.Method.ToUpper().Equals("POST"))
+            var path = context.Request.Path;
+            if (path.StartsWithSegments("/files/upload"))
             {
                 var file = context.Request.Form.Files.FirstOrDefault();
                 if (file == null)
                 {
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    context = SetHttpContextResponse(context, "File is null.");
                     return;
                 }
 
                 var validateFileType = ValidateFileTypesForUpload(file.FileName);
                 if (!validateFileType)
                 {
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    context = SetHttpContextResponse(context, "Invalidate file type.");
                     return;
                 }
 
                 var validateFileSize = ValidateFileSize(file.Length);
                 if (!validateFileSize)
                 {
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    context = SetHttpContextResponse(context, "Invalidate file size.");
                     return;
                 }
                 context.Response.StatusCode = StatusCodes.Status200OK;
             }
-            // To handle other methods like PUT, DELETE etc.
-            else
+            else if (path.StartsWithSegments("/files/download"))
             {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                return;
+                try
+                {
+                    if (!ValidateDownloadTime())
+                    {
+                        context = SetHttpContextResponse(context, "Invalidate download time.");
+                        return;
+                    }
+
+                    var fileId = context.Request.Query["id"];
+                    if (String.IsNullOrEmpty(fileId))
+                    {
+                        context = SetHttpContextResponse(context, "Invalid parameter passed.");
+                        return;
+                    }
+
+                    var fileModel = await _applicationContext.Files.FirstOrDefaultAsync(o => o.Id.Equals(fileId));
+                    if (fileModel == null)
+                    {
+                        context = SetHttpContextResponse(context, "File data does not exist in the database.");
+                        return;
+                    }
+
+                    if (!File.Exists(fileModel.Path))
+                    {
+                        context = SetHttpContextResponse(context, "File not found");
+                        return;
+                    }
+
+                    byte[] file = File.ReadAllBytes(fileModel.Path);
+                    var validateFileType = ValidateFileTypesForDownload(fileModel.Name);
+                    if (validateFileType)
+                    {
+                        var validateFileSize = ValidateFileSize(file.Length);
+                        if (!validateFileSize)
+                        {
+                            context = SetHttpContextResponse(context, "Invalid file size.");
+                            return;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new FileException();
+                }
+                context.Response.StatusCode = StatusCodes.Status200OK;
             }
 
             await _requestDelegate(context);
@@ -125,7 +117,6 @@ namespace FileDistributionService.Middleware
             if (!allowedExtensions.Any(o => fileId.Contains(o)))
             {
                 return false;
-
             }
 
             return true;
@@ -158,5 +149,13 @@ namespace FileDistributionService.Middleware
             return true;
         }
 
+        public HttpContext SetHttpContextResponse(HttpContext context, string errorMessage)
+        {
+            _logger.LogError(errorMessage);
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.WriteAsync(errorMessage);
+
+            return context;
+        }
     }
 }
